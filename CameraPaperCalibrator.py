@@ -2,76 +2,79 @@ import cv2
 import numpy as np
 import sophus as sp
 import apriltag
-from ceres import Solver, Problem, CostFunction, LossFunction
+import compute_error as ce
+# from ceres import Solver, Problem, CostFunction, LossFunction
 
 # 代价函数，用于计算重投影误差
-class ReprojectionError(CostFunction):
-    def __init__(self, observed_x, observed_y):
-        super(ReprojectionError, self).__init__(2, 16)  # 残差维度为2，状态变量维度为16（4x4变换矩阵）
-        self.observed_x = observed_x
-        self.observed_y = observed_y
+# class ReprojectionError(CostFunction):
+#     def __init__(self, observed_x, observed_y):
+#         super(ReprojectionError, self).__init__(2, 16)  # 残差维度为2，状态变量维度为16（4x4变换矩阵）
+#         self.observed_x = observed_x
+#         self.observed_y = observed_y
 
-    def Evaluate(self, parameters, residuals):
-        # 从参数中恢复变换矩阵
-        T = np.reshape(parameters, (4, 4))
+#     def Evaluate(self, parameters, residuals):
+#         # 从参数中恢复变换矩阵
+#         T = np.reshape(parameters, (4, 4))
         
-        # 假设世界坐标系中的点是 (x, y, z, 1)
-        world_point = np.array([self.tag_positions_world[i][0], self.tag_positions_world[i][1], self.tag_positions_world[i][2], 1])
+#         # 假设世界坐标系中的点是 (x, y, z, 1)
+#         world_point = np.array([self.tag_positions_world[i][0], self.tag_positions_world[i][1], self.tag_positions_world[i][2], 1])
         
-        # 将世界坐标系中的点变换到相机坐标系
-        camera_point = T.dot(world_point)
+#         # 将世界坐标系中的点变换到相机坐标系
+#         camera_point = T.dot(world_point)
         
-        # 将相机坐标系中的点投影到像素坐标系
-        pixel_point = self.camera_matrix @ camera_point[:3]
-        pixel_point /= pixel_point[2]
+#         # 将相机坐标系中的点投影到像素坐标系
+#         pixel_point = self.camera_matrix @ camera_point[:3]
+#         pixel_point /= pixel_point[2]
         
-        # 计算残差
-        residuals[0] = pixel_point[0] - self.observed_x
-        residuals[1] = pixel_point[1] - self.observed_y
+#         # 计算残差
+#         residuals[0] = pixel_point[0] - self.observed_x
+#         residuals[1] = pixel_point[1] - self.observed_y
         
 class CameraPaperCalibrator:
     def __init__(self):
         # Initialize your calibrator
         self.tags = []
-        self.tag_paper_transforms = []
-        self.tag_camera_transforms = []
+        self.tag_paper_transforms = {}
+        self.tag_camera_transforms = {}
         self.camera_matrix = []
 
     
-    def add_tag_paper_transform(self, T):
+    def add_tag_paper_transform(self, T,tag_id):
         """Add a tag's position in paper coordinates."""
-        self.tag_paper_transforms.append(T)
+        self.tag_paper_transforms[tag_id]=T
 
-    def add_tag_camera_transform(self, T):
+    def add_tag_camera_transform(self, T,tag_id):
         """Add a detected tag's position in camera coordinate"""
-        self.tag_camera_transforms.append(T)
+        self.tag_camera_transforms[tag_id]=T
 
     def calibrate(self, initial_guess=None):
         """Perform calibration and return the camera-paper transformation"""
         if initial_guess is None:
             initial_guess = np.eye(4)  # 4x4 identity matrix
 
+        # 优化
+        result = ce.optimize_camera_table_transform(self.tag_camera_transforms,self.tag_paper_transforms, initial_guess)
         # Define the problem
-        problem = Problem()
+        # problem = Problem()
 
-        # 添加残差块
-        for i, tag in enumerate(self.tags):
-            if i < len(self.tag_paper_transforms):
-                T_table = self.tag_paper_transforms[i]
-                world_point = T_table[:3, 3]  # 提取世界坐标系中的点
+        # # 添加残差块
+        # for i, tag in enumerate(self.tags):
+        #     if i < len(self.tag_paper_transforms):
+        #         T_table = self.tag_paper_transforms[i]
+        #         world_point = T_table[:3, 3]  # 提取世界坐标系中的点
 
-                # 定义代价函数
-                error = ReprojectionError(tag.center[0], tag.center[1], world_point, self.camera_matrix)
-                problem.AddResidualBlock(error, None, initial_guess)
+        #         # 定义代价函数
+        #         error = ReprojectionError(tag.center[0], tag.center[1], world_point, self.camera_matrix)
+        #         problem.AddResidualBlock(error, None, initial_guess)
 
-        # 配置求解器选项
-        options = SolverOptions()
-        options.linear_solver_type = 'DENSE_QR'
-        options.minimizer_progress_to_stdout = True
+        # # 配置求解器选项
+        # options = SolverOptions()
+        # options.linear_solver_type = 'DENSE_QR'
+        # options.minimizer_progress_to_stdout = True
 
-        # 求解
-        solver = Solver(options)
-        result = solver.Solve(problem, initial_guess)
+        # # 求解
+        # solver = Solver(options)
+        # result = solver.Solve(problem, initial_guess)
 
         return result  # Return the optimized transformation matrix
     
@@ -119,11 +122,11 @@ def main():
         # 获得相机坐标系下Tag矩阵
         M, e1, e2 = detector.detection_pose(tag, cam_params)
         M[:3,3:] *= tag_len
-        tag_positions_camera.append(M)
+        calibrator.add_tag_camera_transform(M,tag.tag_id)
         # 获得世界坐标系下Tag矩阵
         obj2world = np.identity(4)
         obj2world[:3,3] = tag_positions_world[i]
-        tag_positions_table.append(obj2world)           
+        calibrator.add_tag_paper_transform(obj2world,tag.tag_id)        
         
         for i in range(4):
             cv2.circle(image, tuple(tag.corners[i].astype(int)), 4, (255, 0, 0), 2)
@@ -131,10 +134,6 @@ def main():
                 
     cv2.imshow("target_photo",image)
     # cv2.waitKey()
-          
-    for T_camera, T_table in zip(tag_positions_camera, tag_positions_table):
-        calibrator.add_tag_paper_transform(T_table)
-        calibrator.add_tag_camera_transform(T_camera)
 
     # Perform calibration
     result = calibrator.calibrate()
