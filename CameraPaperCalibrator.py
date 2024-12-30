@@ -54,6 +54,15 @@ class CameraPaperCalibrator:
 
         # 优化
         result = ce.optimize_camera_table_transform(self.tag_camera_transforms,self.tag_paper_transforms, initial_guess)
+        
+        # 调用可视化函数
+        ce.visualize_optimization_result(result, self.tag_camera_transforms,self.tag_paper_transforms)
+
+        # 计算误差统计
+        errors = ce.calculate_error_statistics(result, self.tag_camera_transforms,self.tag_paper_transforms)
+
+        # 绘制误差分布
+        ce.plot_error_distribution(errors)
         # Define the problem
         # problem = Problem()
 
@@ -140,6 +149,8 @@ def main():
 
     print("Optimized Transformation Matrix:")
     print(result)
+    
+    
 
 if __name__ == "__main__":
     main()
