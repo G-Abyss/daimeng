@@ -23,7 +23,8 @@ def compute_error(T_camera_table, camera_transforms, paper_transforms):
 
             # 误差为预测位姿与实际位姿的 Frobenius 范数
             diff = T_camera_tag - T_predicted
-            error += np.linalg.norm(diff, ord='fro')
+            print(diff[:3,...])
+            error += np.linalg.norm(diff[:3,...], ord='fro')
     return error
 
 
